@@ -1,7 +1,7 @@
-use log::error;
+use log::{debug, error};
 use lsp_types::TextDocumentPositionParams;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::OnceLock, collections::HashMap};
+use std::{collections::HashMap, path::PathBuf, sync::OnceLock};
 use util::get_text_byte_offset;
 
 use crate::tree_sitter::Position;
@@ -37,22 +37,21 @@ impl TryFrom<&(PathBuf, String)> for HxCompletion {
 }
 
 pub fn hx_completion(text_params: TextDocumentPositionParams) -> Option<Vec<HxCompletion>> {
-
     let result = crate::tree_sitter::get_position_from_lsp_completion(text_params.clone())?;
 
-    error!("result: {:?} params: {:?}", result, text_params);
+    debug!("result: {:?} params: {:?}", result, text_params);
 
     match result {
         Position::AttributeName(name) => {
             if name.starts_with("hx-") {
                 return HX_TAGS.get().cloned();
             }
-        },
+        }
 
         Position::AttributeValue { name, .. } => {
             let values = HX_ATTRIBUTE_VALUES.get()?.get(&name)?;
             return Some(values.clone());
-        },
+        }
     };
 
     return None;

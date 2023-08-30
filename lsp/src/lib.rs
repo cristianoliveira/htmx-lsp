@@ -1,7 +1,8 @@
-mod tree_sitter;
 mod handle;
-mod text_store;
 mod htmx;
+mod text_store;
+mod tree_sitter;
+mod tree_sitter_querier;
 
 use anyhow::Result;
 use htmx::HxCompletion;
@@ -15,8 +16,8 @@ use lsp_server::{Connection, Message, Response};
 
 use crate::{
     handle::{handle_notification, handle_other, handle_request, HtmxResult},
-    text_store::init_text_store,
     htmx::init_hx_tags,
+    text_store::init_text_store,
 };
 
 fn to_completion_list(items: Vec<HxCompletion>) -> CompletionList {
@@ -79,7 +80,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
             }
             None => continue,
         } {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => error!("failed to send response: {:?}", e),
         };
     }
@@ -103,11 +104,7 @@ pub fn start_lsp() -> Result<()> {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         completion_provider: Some(lsp_types::CompletionOptions {
             resolve_provider: Some(false),
-            trigger_characters: Some(vec![
-                "-".to_string(),
-                "\"".to_string(),
-                " ".to_string(),
-            ]),
+            trigger_characters: Some(vec!["-".to_string(), "\"".to_string(), " ".to_string()]),
             work_done_progress_options: WorkDoneProgressOptions {
                 work_done_progress: None,
             },

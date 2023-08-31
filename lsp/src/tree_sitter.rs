@@ -75,18 +75,14 @@ fn query_position(root: Node<'_>, source: &str, trigger_point: Point) -> Option<
     debug!("query_position closest_node {:?}", closest_node.to_sexp());
 
     let element = find_element_referent_to_current_node(closest_node)?;
-    let previous_nodes =
-        element.descendant_for_point_range(element.start_position(), trigger_point)?;
 
-    debug!("query_position: {:?}", previous_nodes.to_sexp());
-
-    let attr_completion = query_attr_keys_for_completion(previous_nodes, source);
+    let attr_completion = query_attr_keys_for_completion(element, source, trigger_point);
 
     if attr_completion.is_some() {
         return attr_completion;
     }
 
-    let value_completion = query_attr_values_for_completion(previous_nodes, source);
+    let value_completion = query_attr_values_for_completion(element, source, trigger_point);
 
     return value_completion;
 }
@@ -312,5 +308,33 @@ mod tests {
         let matches = query_position(tree.root_node(), text, Point::new(0, 23));
 
         assert_eq!(matches, Some(Position::AttributeName("hx-t".to_string())));
+    }
+
+    #[test]
+    fn test_suggest_values_for_already_filled_attributes() {
+        let text = r##"<div hx-get="/foo" hx-target="find " hx-swap="#swap"></div>"##;
+
+        let tree = prepare_tree(&text);
+
+        let matches = query_position(tree.root_node(), text, Point::new(0, 35));
+
+        assert_eq!(
+            matches,
+            Some(Position::AttributeValue {
+                name: "hx-target".to_string(),
+                value: "".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_does_not_suggest_when_cursor_is_outside() {
+        let text = r##"<div hx-get="/foo"  ></div>"##;
+
+        let tree = prepare_tree(&text);
+
+        let matches = query_position(tree.root_node(), text, Point::new(0, 19));
+
+        assert_eq!(matches, None);
     }
 }

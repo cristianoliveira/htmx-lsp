@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use log::{debug, error};
 use tree_sitter::{Node, Point, Query, QueryCursor, Range};
 
 use crate::tree_sitter::Position;
@@ -10,11 +11,18 @@ use crate::tree_sitter::Position;
 // at the "=" but no quote, so we shouldn't suggest yet eg <div hx-foo=|>
 const KEY_VALUE_SEPARATOR: &str = "=";
 
+#[derive(Debug)]
+struct CaptureDetails {
+    value: String,
+    end: Point,
+}
+
 fn query_props(
     query_string: &str,
     node: Node<'_>,
     source: &str,
-) -> Option<HashMap<String, String>> {
+    trigger_point: Point,
+) -> Option<HashMap<String, CaptureDetails>> {
     let query = Query::new(tree_sitter_html::language(), query_string).expect(&format!(
         "get_position_by_query invalid query {query_string}"
     ));
@@ -22,25 +30,40 @@ fn query_props(
 
     let capture_names = query.capture_names();
 
-    let mut matches = cursor_qry.matches(&query, node, source.as_bytes());
+    let matches = cursor_qry.matches(&query, node, source.as_bytes());
 
     let mut props = HashMap::new();
     matches.into_iter().for_each(|match_| {
-        match_.captures.iter().for_each(|capture| {
-            let name = capture_names[capture.index as usize].to_owned();
-            let value = capture
-                .node
-                .utf8_text(source.as_bytes())
-                .expect(&format!("failed to parse capture value for '{name}'"))
-                .to_owned();
-            props.insert(name, value);
-        });
+        match_
+            .captures
+            .iter()
+            .filter(|capture| capture.node.start_position() <= trigger_point)
+            .for_each(|capture| {
+                let key = capture_names[capture.index as usize].to_owned();
+                let value = if let Ok(capture_value) = capture.node.utf8_text(source.as_bytes()) {
+                    capture_value.to_owned()
+                } else {
+                    error!("query_props capture.node.utf8_text failed {key}");
+                    "".to_owned()
+                };
+
+                let details = CaptureDetails {
+                    value,
+                    end: capture.node.end_position(),
+                };
+
+                props.insert(key, details);
+            });
     });
 
     Some(props)
 }
 
-pub fn query_attr_keys_for_completion(node: Node<'_>, source: &str) -> Option<Position> {
+pub fn query_attr_keys_for_completion(
+    node: Node<'_>,
+    source: &str,
+    trigger_point: Point,
+) -> Option<Position> {
     // [ means match any of the following
     let query_string = r#"
     (
@@ -65,7 +88,7 @@ pub fn query_attr_keys_for_completion(node: Node<'_>, source: &str) -> Option<Po
         ]
     )"#;
 
-    let attr_completion = query_props(query_string, node, source);
+    let attr_completion = query_props(query_string, node, source, trigger_point);
     let props = attr_completion?;
     let attr_name = props.get("attr_name")?;
 
@@ -73,10 +96,14 @@ pub fn query_attr_keys_for_completion(node: Node<'_>, source: &str) -> Option<Po
         return None;
     }
 
-    return Some(Position::AttributeName(attr_name.to_owned()));
+    return Some(Position::AttributeName(attr_name.value.to_owned()));
 }
 
-pub fn query_attr_values_for_completion(node: Node<'_>, source: &str) -> Option<Position> {
+pub fn query_attr_values_for_completion(
+    node: Node<'_>,
+    source: &str,
+    trigger_point: Point,
+) -> Option<Position> {
     // [ means match any of the following
     let query_string = r#"(
         [
@@ -106,41 +133,52 @@ pub fn query_attr_values_for_completion(node: Node<'_>, source: &str) -> Option<
               (quoted_attribute_value) @quoted_attr_value
 
               (#eq? @quoted_attr_value "\"\"")
-            ) @empty_value
+            ) @empty_attribute
           )
 
           (_
-            (tag_name)
+            (tag_name) 
 
             (attribute 
               (attribute_name) @attr_name
-              (quoted_attribute_value) @quoted_attr_value
-            ) @empty_value
+              (quoted_attribute_value (attribute_value) @attr_value)
+
+              ) @non_empty_attribute 
           )
         ]
 
         (#match? @attr_name "hx-.*")
     )"#;
 
-    let value_completion = query_props(query_string, node, source);
+    let value_completion = query_props(query_string, node, source, trigger_point);
     let props = value_completion?;
 
     let attr_name = props.get("attr_name")?;
-    if props.get("open_quote_err").is_some() || props.get("empty_value").is_some() {
+
+    debug!("query_attr_values_for_completion attr_name {:?}", attr_name);
+
+    if props.get("open_quote_err").is_some() || props.get("empty_attribute").is_some() {
         return Some(Position::AttributeValue {
-            name: attr_name.to_string(),
+            name: attr_name.value.to_owned(),
             value: "".to_string(),
         });
     }
 
     if let Some(error_char) = props.get("error_char") {
-        if error_char == KEY_VALUE_SEPARATOR {
+        if error_char.value == KEY_VALUE_SEPARATOR {
             return None;
         }
     };
 
+    if let Some(capture) = props.get("non_empty_attribute") {
+        // If the editor cursor point is after the attribute value, don't suggest
+        if trigger_point >= capture.end {
+            return None;
+        }
+    }
+
     return Some(Position::AttributeValue {
-        name: attr_name.to_string(),
+        name: attr_name.value.to_owned(),
         value: "".to_string(),
     });
 }

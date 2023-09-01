@@ -309,4 +309,32 @@ mod tests {
 
         assert_eq!(matches, Some(Position::AttributeName("hx-t".to_string())));
     }
+
+    #[test]
+    fn test_suggest_values_for_already_filled_attributes() {
+        let text = r##"<div hx-get="/foo" hx-target="find " hx-swap="#swap"></div>"##;
+
+        let tree = prepare_tree(&text);
+
+        let matches = query_position(tree.root_node(), text, Point::new(0, 35));
+
+        assert_eq!(
+            matches,
+            Some(Position::AttributeValue {
+                name: "hx-target".to_string(),
+                value: "".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_does_not_suggest_when_cursor_is_outside() {
+        let text = r##"<div hx-get="/foo"  ></div>"##;
+
+        let tree = prepare_tree(&text);
+
+        let matches = query_position(tree.root_node(), text, Point::new(0, 19));
+
+        assert_eq!(matches, None);
+    }
 }
